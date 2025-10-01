@@ -3,7 +3,7 @@ name: CI/CD — build & deploy (test)
 on:
   push:
     branches:
-      - test # change to ''main'' if you want to deploy from main
+      - test # change to 'main' if you want to deploy from main
 
 jobs:
   build-and-deploy:
