@@ -24,16 +24,15 @@ jobs:
         run: |
           npm install -g yarn
           yarn install --frozen-lockfile
-          yarn build || echo "no build step"
+          yarn build || exit 1  # Fail workflow if build fails
 
       - name: Package release (stable)
-        # This step prefers packaging the built folder (dist/ or build/) to avoid tar
-        # reading files that are changing. If no build dir exists, use git archive.
         run: |
           set -e
           rm -f release.tar.gz || true
+          rm -rf /tmp/release
+          mkdir -p /tmp/release
 
-          # if you have a built output folder (dist or build), package only that
           if [ -d dist ]; then
             echo "Packaging dist/ into release.tar.gz"
             rsync -a --delete --exclude=node_modules --exclude=.git dist/ /tmp/release/
@@ -43,7 +42,6 @@ jobs:
             rsync -a --delete --exclude=node_modules --exclude=.git build/ /tmp/release/
             tar -C /tmp/release -czf release.tar.gz .
           else
-            # fallback: use git archive of tracked files at HEAD (safe for CI)
             echo "No build/ or dist/ found — using git archive of tracked files"
             git archive -o release.tar.gz --format=tar.gz HEAD
           fi
@@ -93,13 +91,16 @@ jobs:
 
             # install production dependencies (try yarn, else npm)
             if command -v yarn >/dev/null 2>&1; then
-              yarn install --frozen-lockfile --production || true
+              yarn install --frozen-lockfile --production
             else
-              npm ci --only=production || true
+              npm ci --only=production
             fi
 
-            # restart with pm2 (adjust name/script if needed)
-            pm2 restart ci-cd-test || pm2 start npm --name "ci-cd-test" -- start || echo "pm2 start failed"
+            # restart with PM2 using explicit ecosystem file and update env
+            pm2 restart /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
+            pm2 start /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
+            echo "PM2 start/restart failed"
+
             pm2 save || true
 
             echo "Deploy finished: $(date)"
