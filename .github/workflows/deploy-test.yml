@@ -1,0 +1,81 @@
+name: CI/CD — build & deploy (test)
+
+on:
+  push:
+    branches:
+      - test # change to 'main' if you want to deploy from main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_PATH: /var/www/ci-cd-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install deps and build
+        run: |
+          npm install -g yarn
+          yarn install --frozen-lockfile
+          yarn build || echo "no build step"
+
+      - name: Package release
+        run: |
+          tar -czf release.tar.gz --exclude=node_modules --exclude=.git --exclude=*.log .
+
+      - name: Upload release to server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: "release.tar.gz"
+          target: ${{ env.DEPLOY_PATH }}
+
+      - name: Deploy on server (extract, install, chown, restart)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -e
+            mkdir -p ${{ env.DEPLOY_PATH }}
+            cd ${{ env.DEPLOY_PATH }}
+
+            # extract uploaded archive
+            tar -xzf release.tar.gz || (echo "extract failed" && exit 1)
+            rm -f release.tar.gz || true
+
+            # ensure deploy owns the files (fix permissions)
+            chown -R deploy:deploy ${{ env.DEPLOY_PATH }}
+
+            # install production dependencies
+            if command -v yarn >/dev/null 2>&1; then
+              yarn install --frozen-lockfile --production || true
+            else
+              npm ci --only=production || true
+            fi
+
+            # create .env from secrets if provided (OPTIONAL - uncomment and adapt)
+            # cat > .env <<'EOF'
+            # PORT=${{ secrets.APP_PORT }}
+            # DATABASE_URL=${{ secrets.DATABASE_URL }}
+            # SECRET_KEY=${{ secrets.SECRET_KEY }}
+            # EOF
+            # chown deploy:deploy .env
+
+            # restart with pm2 (adjust name/script if needed)
+            pm2 restart ci-cd-test || pm2 start npm --name "ci-cd-test" -- start || echo "pm2 start failed"
+            pm2 save || true
+
+            echo "Deploy finished: $(date)"
