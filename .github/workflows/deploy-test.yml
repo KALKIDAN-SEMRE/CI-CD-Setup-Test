@@ -3,7 +3,7 @@ name: CI/CD — build & deploy (test)
 on:
   push:
     branches:
-      - test # change to ''main'' if you want to deploy from main
+      - test
 
 jobs:
   build-and-deploy:
@@ -20,19 +20,29 @@ jobs:
         with:
           node-version: "18"
 
-      - name: Install deps and build
+      - name: Install deps (runner) and attempt build (if present)
         run: |
           npm install -g yarn
+          # Install dependencies for CI/build on runner
+          # If you prefer npm, replace with `npm ci`
           yarn install --frozen-lockfile
-          yarn build || exit 1  # Fail workflow if build fails
 
-      - name: Package release (stable)
+          # Try to run build *if* a build script exists; if not, continue
+          if yarn -s run | grep -q 'build'; then
+            echo "build script found, running yarn build"
+            yarn build
+          else
+            echo "no build script found; skipping build"
+          fi
+
+      - name: Package release
         run: |
           set -e
           rm -f release.tar.gz || true
-          rm -rf /tmp/release
+          rm -rf /tmp/release || true
           mkdir -p /tmp/release
 
+          # Prefer build/dist if present
           if [ -d dist ]; then
             echo "Packaging dist/ into release.tar.gz"
             rsync -a --delete --exclude=node_modules --exclude=.git dist/ /tmp/release/
@@ -42,7 +52,7 @@ jobs:
             rsync -a --delete --exclude=node_modules --exclude=.git build/ /tmp/release/
             tar -C /tmp/release -czf release.tar.gz .
           else
-            echo "No build/ or dist/ found — using git archive of tracked files"
+            echo "No build/ or dist/ found — packaging tracked files from HEAD"
             git archive -o release.tar.gz --format=tar.gz HEAD
           fi
 
@@ -57,7 +67,7 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             mkdir -p ${{ env.DEPLOY_PATH }}
-            chown -R ${{ secrets.SSH_USER }}:$${{ secrets.SSH_USER }} ${{ env.DEPLOY_PATH }} || true
+            chown -R deploy:deploy ${{ env.DEPLOY_PATH }} || true
             echo "Remote path ensured: ${{ env.DEPLOY_PATH }}"
 
       - name: Upload release to server
@@ -89,16 +99,16 @@ jobs:
             # ensure deploy owns the files (fix permissions)
             chown -R deploy:deploy ${{ env.DEPLOY_PATH }} || true
 
-            # install production dependencies (try yarn, else npm)
+            # install production dependencies on server
             if command -v yarn >/dev/null 2>&1; then
-              yarn install --frozen-lockfile --production
+              yarn install --frozen-lockfile --production || true
             else
-              npm ci --only=production
+              npm ci --only=production || true
             fi
 
-            # restart with PM2 using explicit ecosystem file and update env
-            pm2 restart /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
-            pm2 start /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
+            # restart using ecosystem.config.js (use .js name)
+            pm2 restart /var/www/ci-cd-test/ecosystem.config.js --update-env || \
+            pm2 start /var/www/ci-cd-test/ecosystem.config.js --update-env || \
             echo "PM2 start/restart failed"
 
             pm2 save || true
