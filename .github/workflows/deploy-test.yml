@@ -107,8 +107,8 @@ jobs:
             fi
 
             # restart using ecosystem.config.js (use .js name)
-            pm2 restart /var/www/ci-cd-test/ecosystem.config.js --update-env || \
-            pm2 start /var/www/ci-cd-test/ecosystem.config.js --update-env || \
+            pm2 restart /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
+            pm2 start /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
             echo "PM2 start/restart failed"
 
             pm2 save || true
