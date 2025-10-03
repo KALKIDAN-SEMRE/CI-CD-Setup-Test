@@ -23,11 +23,8 @@ jobs:
       - name: Install deps (runner) and attempt build (if present)
         run: |
           npm install -g yarn
-          # Install dependencies for CI/build on runner
-          # If you prefer npm, replace with `npm ci`
           yarn install --frozen-lockfile
 
-          # Try to run build *if* a build script exists; if not, continue
           if yarn -s run | grep -q 'build'; then
             echo "build script found, running yarn build"
             yarn build
@@ -42,7 +39,6 @@ jobs:
           rm -rf /tmp/release || true
           mkdir -p /tmp/release
 
-          # Prefer build/dist if present
           if [ -d dist ]; then
             echo "Packaging dist/ into release.tar.gz"
             rsync -a --delete --exclude=node_modules --exclude=.git dist/ /tmp/release/
@@ -89,24 +85,19 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             set -e
-            mkdir -p ${{ env.DEPLOY_PATH }}
             cd ${{ env.DEPLOY_PATH }}
 
-            # extract uploaded archive
             tar -xzf release.tar.gz || (echo "extract failed" && exit 1)
             rm -f release.tar.gz || true
 
-            # ensure deploy owns the files (fix permissions)
             chown -R deploy:deploy ${{ env.DEPLOY_PATH }} || true
 
-            # install production dependencies on server
             if command -v yarn >/dev/null 2>&1; then
               yarn install --frozen-lockfile --production || true
             else
               npm ci --only=production || true
             fi
 
-            # restart using ecosystem.config.js (use .js name)
             pm2 restart /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
             pm2 start /var/www/ci-cd-test/ecosystem.config.cjs --update-env || \
             echo "PM2 start/restart failed"
